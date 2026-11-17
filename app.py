@@ -348,7 +348,7 @@ def valor_manual(nome):
 # A partir daqui é a página que a pessoa vê.
 # ---------------------------------------------------------------------------
 st.set_page_config(page_title="Rebalanceamento de carteira", layout="wide")
-st.title("Rebalanceamento de carteira")
+st.header("Rebalanceamento de carteira")  # st.header é menor que st.title: no celular não quebra a palavra no meio
 st.markdown("Menos tempo atualizando planilha na mão. Esta ferramenta busca os preços e calcula, ativo por ativo e "
             "classe por classe, quanto a sua carteira está acima ou abaixo da meta, em R$, para você ver o que falta "
             "comprar ou vender para voltar ao equilíbrio. Dados fictícios de exemplo.")
@@ -524,6 +524,15 @@ def mostrar_movimentacoes():
 # Página: Visão geral (botões principais, patrimônio, cartões e tabela por classe)
 # ---------------------------------------------------------------------------
 if pagina == "Visão geral":
+    with st.expander("Como usar em 4 passos", expanded=True):
+        st.markdown(
+            "1. **Carregue a sua carteira** em CSV (ou use o exemplo que já está aqui).\n"
+            "2. **Atualize os preços** para buscar as cotações do Yahoo Finance.\n"
+            "3. **Registre as movimentações** (compras, vendas, aportes e retiradas) e veja abaixo quanto cada "
+            "classe está acima ou abaixo da meta.\n"
+            "4. **Baixe a carteira (CSV)** antes de fechar a página. Na próxima consulta, carregue esse arquivo "
+            "no passo 1 para continuar de onde parou.")
+
     # Faixa de botões na mesma ordem dos passos de "Como usar".
     b1, b2, b3, b4 = st.columns(4)
     with b1:
@@ -539,14 +548,6 @@ if pagina == "Visão geral":
     if st.session_state.get("busca_refeita_as"):
         st.markdown(f"Busca de preços refeita às {st.session_state['busca_refeita_as']} (horário de Brasília).")
 
-    with st.expander("Como usar em 4 passos", expanded=True):
-        st.markdown(
-            "1. **Carregue a sua carteira** em CSV (ou use o exemplo que já está aqui).\n"
-            "2. **Atualize os preços** para buscar as cotações do Yahoo Finance.\n"
-            "3. **Registre as movimentações** (compras, vendas, aportes e retiradas) e veja abaixo quanto cada "
-            "classe está acima ou abaixo da meta.\n"
-            "4. **Baixe a carteira (CSV)** antes de fechar a página. Na próxima consulta, carregue esse arquivo "
-            "no passo 1 para continuar de onde parou.")
 
     if erro_calculo:
         st.error(f"Não consegui calcular os valores: {erro_calculo}")
