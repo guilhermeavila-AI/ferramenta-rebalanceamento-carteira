@@ -347,8 +347,8 @@ def valor_manual(nome):
 # ---------------------------------------------------------------------------
 # A partir daqui é a página que a pessoa vê.
 # ---------------------------------------------------------------------------
-st.set_page_config(page_title="Rebalanceamento de carteira", layout="wide")
-st.header("Rebalanceamento de carteira")  # st.header é menor que st.title: no celular não quebra a palavra no meio
+st.set_page_config(page_title="Rebalanceamento de Carteira de Investimentos", layout="wide")
+st.header("Rebalanceamento de Carteira de Investimentos")  # st.header é menor que st.title: no celular não quebra a palavra no meio
 st.markdown("Menos tempo atualizando planilha na mão. Esta ferramenta busca os preços e calcula, ativo por ativo e "
             "classe por classe, quanto a sua carteira está acima ou abaixo da meta, em R$, para você ver o que falta "
             "comprar ou vender para voltar ao equilíbrio. Dados fictícios de exemplo.")
@@ -371,6 +371,7 @@ carregando.info("Carregando os dados e os preços... isso pode levar alguns segu
 if "carteira" not in st.session_state:
     st.session_state["carteira"] = carteira  # cópia de trabalho, vinda do CSV
     st.session_state["movimentacoes"] = []   # lista do que foi registrado nesta sessão
+    st.session_state["origem"] = "exemplo"   # "exemplo" (dados fictícios) ou "carregada" (arquivo da pessoa)
 if "precos_manuais" not in st.session_state:
     st.session_state["precos_manuais"] = {}  # preços digitados na mão (plano B se o Yahoo falhar)
 if "menu" not in st.session_state:
@@ -446,6 +447,33 @@ carregando.empty()  # tudo calculado (ou parou com aviso): tira a mensagem de es
 COLUNAS_RS = ["Valor (R$)", "Meta (R$)", "Diferença (R$)"]
 COLUNAS_PCT = ["Atual (%)", "Meta (%)"]
 AVISO_SEM_CALCULO = "Faltam preços (ou a cotação do dólar) para calcular. Veja a página Preços."
+
+
+def carteira_de_exemplo():
+    """True enquanto a carteira mostrada é a de exemplo (dados fictícios)."""
+    return st.session_state.get("origem", "exemplo") == "exemplo"
+
+
+def aviso_movimentacoes():
+    """Aviso amarelo: sem baixar a carteira, as movimentações se perdem ao recarregar a página.
+    Só aparece quando já existe alguma movimentação registrada nesta sessão."""
+    n_mov = len(st.session_state["movimentacoes"])
+    if n_mov == 1:
+        st.warning("Você registrou 1 movimentação nesta sessão. Ela só fica guardada se você baixar a carteira "
+                   "(se recarregar ou fechar a página, o app volta ao exemplo).")
+    elif n_mov > 1:
+        st.warning(f"Você registrou {n_mov} movimentações nesta sessão. Elas só ficam guardadas se você baixar a carteira "
+                   "(se recarregar ou fechar a página, o app volta ao exemplo).")
+
+
+def aviso_origem():
+    """Caixa azul bem visível dizendo de onde vêm os números da tela."""
+    if carteira_de_exemplo():
+        st.info("Dados fictícios de exemplo: os valores abaixo não são de uma pessoa real. "
+                "Para testar com outra carteira, carregue um CSV em \"Minha carteira\". "
+                "O app não salva os seus dados, mas é público: prefira dados fictícios.")
+    else:
+        st.info("Carteira carregada por você. Ela fica só na memória desta sessão; o app não a salva.")
 
 
 def mostrar_movimentacoes():
@@ -544,18 +572,23 @@ if pagina == "Visão geral":
     with b4:
         st.download_button("Baixar carteira (CSV)", data=csv_atual, key="inicio_baixar",
                            file_name="carteira_atualizada.csv", mime="text/csv")
-    st.markdown("Antes de fechar a página, baixe a carteira: ao abrir o app de novo, ele volta ao exemplo.")
+    if st.session_state["movimentacoes"]:
+        aviso_movimentacoes()  # amarelo: já há movimentações que seriam perdidas
+    else:
+        st.markdown("Antes de fechar a página, baixe a carteira: ao abrir o app de novo, ele volta ao exemplo.")
     if st.session_state.get("busca_refeita_as"):
         st.markdown(f"Busca de preços refeita às {st.session_state['busca_refeita_as']} (horário de Brasília).")
 
 
+    aviso_origem()
     if erro_calculo:
         st.error(f"Não consegui calcular os valores: {erro_calculo}")
     elif not calculo_ok:
         st.info(AVISO_SEM_CALCULO)
     else:
-        st.markdown("**Patrimônio total**")  # o rótulo do st.metric é pequeno; este texto usa o tamanho normal
-        st.metric("Patrimônio total", formata_rs(patrimonio), label_visibility="collapsed")
+        rotulo_patrimonio = "Patrimônio total (exemplo fictício)" if carteira_de_exemplo() else "Patrimônio total"
+        st.markdown(f"**{rotulo_patrimonio}**")  # o rótulo do st.metric é pequeno; este texto usa o tamanho normal
+        st.metric(rotulo_patrimonio, formata_rs(patrimonio), label_visibility="collapsed")
         st.markdown("Diferença = valor atual menos a meta. Vermelho: abaixo da meta (falta comprar). "
                    "Verde: acima da meta. Azul: na meta (diferença de até R$ 100, para mais ou para menos).")
 
@@ -587,6 +620,7 @@ if pagina == "Visão geral":
 # Página: Visão por ativo (os ativos de uma classe, ou de todas, coloridos)
 # ---------------------------------------------------------------------------
 elif pagina == "Visão por ativo":
+    aviso_origem()
     if erro_calculo:
         st.error(f"Não consegui calcular os valores: {erro_calculo}")
     elif not calculo_ok:
@@ -615,10 +649,15 @@ elif pagina == "Visão por ativo":
 # ---------------------------------------------------------------------------
 elif pagina == "Registrar movimentações":
     st.subheader("Registrar movimentações")
+    st.markdown("Caixa é o dinheiro parado na carteira, disponível para comprar ativos.")
+    aviso_movimentacoes()
     if not dolar:
         st.info("Sem a cotação do dólar não dá para registrar movimentações. Veja a página Preços.")
     else:
         mostrar_movimentacoes()
+        st.markdown("Depois de registrar, baixe a carteira para guardar as mudanças.")
+        st.download_button("Baixar carteira (CSV)", data=csv_atual, key="registrar_baixar",
+                           file_name="carteira_atualizada.csv", mime="text/csv")
 
 
 # ---------------------------------------------------------------------------
@@ -699,6 +738,7 @@ else:
             else:
                 st.session_state["carteira"] = nova
                 st.session_state["movimentacoes"] = []
+                st.session_state["origem"] = "carregada"
                 st.session_state["aviso_carteira"] = f"Carteira carregada: {len(nova)} linhas."
                 st.rerun()
         with st.expander("Como preparar o arquivo"):
@@ -715,6 +755,7 @@ else:
         if st.button("Voltar para a carteira de exemplo"):
             st.session_state["carteira"] = ler_tabela(PASTA / "carteira_exemplo.csv", COLUNAS_CARTEIRA)
             st.session_state["movimentacoes"] = []
+            st.session_state["origem"] = "exemplo"
             st.session_state["aviso_carteira"] = "Voltou para a carteira de exemplo."
             st.rerun()
 
