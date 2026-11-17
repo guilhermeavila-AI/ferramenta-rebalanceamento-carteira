@@ -2,6 +2,8 @@
 # Etapa 3, itens 1 a 6: ler a carteira e as metas, buscar preços e dólar, calcular valores em R$,
 # mostrar o painel colorido (acima / abaixo da meta), registrar movimentações por formulário
 # (compra, venda, aporte e retirada de caixa) e baixar / carregar a carteira em CSV.
+# A página tem um menu no topo com cinco páginas: Visão geral, Visão por ativo, Registrar movimentações,
+# Preços e Minha carteira. A Visão geral tem botões que levam às outras páginas.
 
 from datetime import date  # para saber a data de hoje
 from pathlib import Path  # ajuda a encontrar os arquivos na mesma pasta do app
@@ -16,6 +18,13 @@ PASTA = Path(__file__).parent
 # Colunas que cada CSV precisa ter. Se faltar alguma, o app avisa em vez de quebrar.
 COLUNAS_CARTEIRA = ["ativo", "codigo_yahoo", "classe", "quantidade", "moeda", "meta_na_classe_pct"]
 COLUNAS_METAS = ["classe", "meta_pct"]
+
+# Nomes das colunas da carteira como aparecem na tela (o CSV continua com os nomes originais).
+NOMES_CARTEIRA = {"ativo": "Ativo", "codigo_yahoo": "Código no Yahoo", "classe": "Classe",
+                  "quantidade": "Quantidade", "moeda": "Moeda", "meta_na_classe_pct": "Meta dentro da classe (%)"}
+
+# As páginas do menu, na ordem em que aparecem.
+PAGINAS = ["Visão geral", "Visão por ativo", "Registrar movimentações", "Preços", "Minha carteira"]
 
 # Código do dólar no Yahoo: quantos reais vale 1 dólar.
 CODIGO_DOLAR = "BRL=X"
@@ -150,14 +159,14 @@ def formata_rs(valor):
     return ("-R$ " if valor < 0 else "R$ ") + texto
 
 
-# Diferenças menores que isto (em R$) contam como "na meta", para não pintar de vermelho por centavos.
-TOLERANCIA_RS = 1.0
+# Diferenças de até este valor (em R$), para cima ou para baixo, contam como "na meta".
+TOLERANCIA_RS = 100.0
 
 # Cor de fundo de cada situação (o texto fica sempre escuro, para ler bem no tema claro e no escuro).
 CORES = {
-    "Abaixo da meta": "background-color: #f8d7da; color: #1a1a1a",  # vermelho claro: falta comprar
-    "Acima da meta": "background-color: #cfe2ff; color: #1a1a1a",   # azul claro: passou da meta
-    "Na meta": "background-color: #d1e7dd; color: #1a1a1a",         # verde claro: ok
+    "Abaixo da meta": "background-color: #fca5a5; color: #1a1a1a",  # vermelho claro: falta comprar
+    "Acima da meta": "background-color: #86efac; color: #1a1a1a",   # verde claro: passou da meta
+    "Na meta": "background-color: #bfdbfe; color: #1a1a1a",         # azul claro: está na meta
 }
 
 
@@ -215,162 +224,7 @@ def buscar_preco(codigo):
 
 
 # ---------------------------------------------------------------------------
-# A partir daqui é a página que a pessoa vê.
-# ---------------------------------------------------------------------------
-st.set_page_config(page_title="Rebalanceamento de carteira", layout="wide")
-st.title("Rebalanceamento de carteira")
-st.caption("Versão em construção. Dados fictícios de exemplo.")
-
-# Tenta ler os dois arquivos. Se algo der errado, mostra o motivo na tela.
-try:
-    carteira = ler_tabela(PASTA / "carteira_exemplo.csv", COLUNAS_CARTEIRA)
-    metas = ler_tabela(PASTA / "metas_classe.csv", COLUNAS_METAS)
-except Exception as erro:
-    st.error(f"Não consegui ler os arquivos: {erro}")
-    st.stop()  # para aqui: sem os arquivos não há o que mostrar
-
-# A carteira fica guardada na "sessão" (a memória do app enquanto a página está aberta).
-# Assim as movimentações registradas continuam valendo a cada atualização da tela.
-# Atenção: se a página for recarregada (F5), volta para o arquivo de exemplo.
-if "carteira" not in st.session_state:
-    st.session_state["carteira"] = carteira  # cópia de trabalho, vinda do CSV
-    st.session_state["movimentacoes"] = []   # lista do que foi registrado nesta sessão
-carteira = st.session_state["carteira"]
-
-st.subheader("Carteira")
-if st.session_state.get("aviso_carteira"):  # mensagem da última carga (a tela é recarregada depois de carregar)
-    st.success(st.session_state.pop("aviso_carteira"))
-st.dataframe(carteira, hide_index=True)
-
-# --- Item 6: baixar a carteira atualizada e carregar uma própria ---
-with st.expander("Salvar ou carregar a carteira (CSV)", expanded=False):
-    st.markdown("**Salvar:** baixe a carteira com as suas movimentações. Ao recarregar a página, "
-                "o app volta ao exemplo; para continuar de onde parou, carregue o arquivo baixado.")
-    # utf-8-sig: o Excel no Windows abre com os acentos certos (Ação) e o app consegue ler de volta.
-    csv_atual = carteira[COLUNAS_CARTEIRA].to_csv(index=False, float_format="%.10g").encode("utf-8-sig")
-    st.download_button("Baixar carteira atualizada (CSV)", data=csv_atual,
-                       file_name="carteira_atualizada.csv", mime="text/csv")
-
-    st.markdown("**Carregar:** envie um CSV com as colunas " + ", ".join(COLUNAS_CARTEIRA) + ". "
-                "As metas por classe continuam as do arquivo metas_classe.csv.")
-    st.caption("Atenção: este app é público. Para dados reais, prefira rodar o app no seu computador; "
-               "aqui use dados fictícios. O app não grava a carteira em arquivo: ela fica só na memória "
-               "enquanto a página está aberta.")
-    arquivo = st.file_uploader("Carteira em CSV (um arquivo por vez)", type="csv")
-    st.caption("Passo 1: escolha o arquivo. Passo 2: clique em \"Usar esta carteira\". "
-               "O \"+\" ao lado do nome serve para trocar o arquivo, não para juntar vários.")
-    if arquivo is not None and st.button("Usar esta carteira"):
-        try:
-            nova, erro_csv = validar_carteira(pd.read_csv(arquivo, encoding="utf-8-sig"), metas)
-        except Exception as erro:  # arquivo que nem é um CSV legível
-            nova, erro_csv = None, f"Não consegui ler o arquivo: {erro}"
-        if erro_csv:
-            st.error(erro_csv + " A carteira atual foi mantida.")
-        else:
-            st.session_state["carteira"] = nova
-            st.session_state["movimentacoes"] = []
-            st.session_state["aviso_carteira"] = f"Carteira carregada: {len(nova)} linhas."
-            st.rerun()
-    if st.button("Voltar para a carteira de exemplo"):
-        st.session_state["carteira"] = ler_tabela(PASTA / "carteira_exemplo.csv", COLUNAS_CARTEIRA)
-        st.session_state["movimentacoes"] = []
-        st.session_state["aviso_carteira"] = "Voltou para a carteira de exemplo."
-        st.rerun()
-
-st.subheader("Metas por classe")
-st.dataframe(metas, hide_index=True)
-
-# Mostra se as metas fazem sentido (somam 100%).
-avisos = conferir_metas(carteira, metas)
-if avisos:
-    for aviso in avisos:
-        st.warning(aviso)
-else:
-    st.success("Conferência das metas: tudo certo (cada nível soma 100%).")
-
-
-# ---------------------------------------------------------------------------
-# Item 2: preços e dólar
-# ---------------------------------------------------------------------------
-st.divider()
-st.subheader("Preços")
-st.caption("Último preço disponível no Yahoo Finance, com a data de cada um. Durante o pregão é o preço do momento "
-           "(com pequeno atraso); fora dele, o fechamento. Ativos em dólar mostram o preço em dólar; "
-           "a conversão para R$ vem no próximo passo.")
-
-# Botão para esquecer o que foi guardado e buscar tudo de novo.
-if st.button("Atualizar preços"):
-    buscar_preco.clear()
-
-with st.spinner("Buscando preços no Yahoo Finance..."):
-    dolar, data_dolar = buscar_preco(CODIGO_DOLAR)
-    consultas = {}  # ativo -> (preço, data)
-    for _, linha in carteira.iterrows():
-        codigo = linha["codigo_yahoo"]
-        if pd.isna(codigo) or str(codigo).strip() == "":
-            continue  # o Caixa não tem código: o preço dele é 1
-        consultas[linha["ativo"]] = buscar_preco(str(codigo).strip())
-
-sem_preco = [ativo for ativo, (preco, _) in consultas.items() if preco is None]
-
-# Plano B: o que o Yahoo não devolveu, a pessoa digita.
-dolar_fonte = "Yahoo"
-precos_manuais = {}
-if dolar is None or sem_preco:
-    st.warning("O Yahoo não devolveu alguns preços. Digite abaixo o que faltou "
-               "(ou clique em 'Atualizar preços' para tentar de novo).")
-    with st.expander("Digitar preços manualmente", expanded=True):
-        if dolar is None:
-            dolar = st.number_input("Dólar (R$ por US$)", min_value=0.0, value=0.0, step=0.01, key="manual_dolar")
-            dolar_fonte = "manual"
-        for ativo in sem_preco:
-            precos_manuais[ativo] = st.number_input(
-                f"Preço de {ativo}", min_value=0.0, value=0.0, step=0.01, key=f"manual_{ativo}")
-
-if not dolar:
-    st.error("Sem a cotação do dólar não dá para converter os ativos em dólar para R$.")
-    st.stop()
-
-# Monta a tabela de preços (será usada no próximo passo, para calcular os valores).
-linhas = []
-for _, linha in carteira.iterrows():
-    ativo = linha["ativo"]
-    if ativo not in consultas:  # Caixa
-        preco, data, fonte = 1.0, None, "caixa (valor 1)"
-    else:
-        preco, data = consultas[ativo]
-        fonte = "Yahoo"
-        if preco is None:
-            preco = precos_manuais.get(ativo) or None  # 0 vira "faltando"
-            fonte = "manual" if preco else "FALTANDO"
-    linhas.append({
-        "ativo": ativo,
-        "moeda": linha["moeda"],
-        "preco": round(preco, 4) if preco else None,
-        "data_do_preco": data.strftime("%d/%m/%Y") if data else "-",
-        "fonte": fonte,
-    })
-tabela_precos = pd.DataFrame(linhas)
-
-st.metric("Dólar (R$ por US$)", f"{dolar:.4f}",
-          help=f"Fonte: {dolar_fonte}" + (f", preço de {data_dolar.strftime('%d/%m/%Y')}" if data_dolar else ""))
-st.dataframe(tabela_precos, hide_index=True)
-
-# Avisos honestos sobre a qualidade dos preços.
-if (tabela_precos["fonte"] == "FALTANDO").any():
-    faltando = ", ".join(tabela_precos.loc[tabela_precos["fonte"] == "FALTANDO", "ativo"])
-    st.warning(f"Ainda sem preço: {faltando}. Os cálculos precisam de todos os preços.")
-
-datas = [d for _, d in consultas.values() if d is not None]
-if datas and (date.today() - min(datas)).days > DIAS_PARA_AVISAR:
-    st.warning(f"Há preços com mais de {DIAS_PARA_AVISAR} dias (o mais antigo é de {min(datas).strftime('%d/%m/%Y')}).")
-
-st.caption("Os preços vêm do Yahoo Finance pela biblioteca yfinance (gratuita e não oficial) e podem divergir "
-           "da cotação da corretora ou ter atraso.")
-
-
-# ---------------------------------------------------------------------------
-# Item 5: formulários de movimentação (compra, venda, aporte e retirada de caixa)
+# Funções de apoio das movimentações (compra, venda, aporte e retirada de caixa)
 # ---------------------------------------------------------------------------
 def registrar_caixa(carteira, tipo, valor):
     """Soma (aporte) ou subtrai (retirada) dinheiro da linha Caixa. Devolve uma mensagem de erro, ou None se deu certo."""
@@ -461,14 +315,148 @@ def agora():
     return pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%d/%m/%Y %H:%M")
 
 
-with st.expander("Registrar movimentação", expanded=False):
+def hora_agora():
+    """Só a hora de Brasília (HH:MM), para a mensagem de atualização dos preços."""
+    return pd.Timestamp.now(tz="America/Sao_Paulo").strftime("%H:%M")
+
+
+# ---------------------------------------------------------------------------
+# Menu e botões da página inicial
+# ---------------------------------------------------------------------------
+def ir_para(pagina):
+    """Troca a página do menu. Os botões da página inicial chamam esta função ao serem clicados
+    (ela roda antes da tela ser redesenhada, por isso é permitido mudar o menu aqui)."""
+    st.session_state["menu"] = pagina
+
+
+def atualizar_precos():
+    """Esquece os preços guardados (os 15 minutos de memória) para buscar tudo de novo no Yahoo."""
+    buscar_preco.clear()
+    st.session_state["busca_refeita_as"] = hora_agora()
+
+
+def valor_manual(nome):
+    """Devolve o preço digitado na mão para 'nome' (um ativo ou 'dolar'); 0 se ninguém digitou.
+    O valor fica guardado na sessão, para não se perder quando a pessoa troca de página."""
+    chave = f"manual_{nome}"
+    if chave in st.session_state:  # o campo existe na tela agora: guarda o que está nele
+        st.session_state["precos_manuais"][nome] = st.session_state[chave]
+    return st.session_state["precos_manuais"].get(nome, 0.0)
+
+
+# ---------------------------------------------------------------------------
+# A partir daqui é a página que a pessoa vê.
+# ---------------------------------------------------------------------------
+st.set_page_config(page_title="Rebalanceamento de carteira", layout="wide")
+st.title("Rebalanceamento de carteira")
+st.markdown("Menos tempo atualizando planilha na mão. Esta ferramenta busca os preços e calcula, ativo por ativo e "
+            "classe por classe, quanto a sua carteira está acima ou abaixo da meta, em R$, para você ver o que falta "
+            "comprar ou vender para voltar ao equilíbrio. Dados fictícios de exemplo.")
+
+# Tenta ler os dois arquivos. Se algo der errado, mostra o motivo na tela.
+try:
+    carteira = ler_tabela(PASTA / "carteira_exemplo.csv", COLUNAS_CARTEIRA)
+    metas = ler_tabela(PASTA / "metas_classe.csv", COLUNAS_METAS)
+except Exception as erro:
+    st.error(f"Não consegui ler os arquivos: {erro}")
+    st.stop()  # para aqui: sem os arquivos não há o que mostrar
+
+# Mensagem de espera: aparece enquanto o app busca os preços e some quando a página termina de carregar.
+carregando = st.empty()
+carregando.info("Carregando os dados e os preços... isso pode levar alguns segundos.")
+
+# A carteira fica guardada na "sessão" (a memória do app enquanto a página está aberta).
+# Assim as movimentações registradas continuam valendo a cada atualização da tela.
+# Atenção: se a página for recarregada (F5), volta para o arquivo de exemplo.
+if "carteira" not in st.session_state:
+    st.session_state["carteira"] = carteira  # cópia de trabalho, vinda do CSV
+    st.session_state["movimentacoes"] = []   # lista do que foi registrado nesta sessão
+if "precos_manuais" not in st.session_state:
+    st.session_state["precos_manuais"] = {}  # preços digitados na mão (plano B se o Yahoo falhar)
+if "menu" not in st.session_state:
+    st.session_state["menu"] = PAGINAS[0]    # página em que o app abre
+carteira = st.session_state["carteira"]
+
+# O menu no topo. A chave "menu" permite que os botões da página inicial troquem de página.
+pagina = st.radio("Menu", PAGINAS, horizontal=True, key="menu", label_visibility="collapsed")
+
+# CSV da carteira atual (usado pelos botões de baixar). utf-8-sig: o Excel no Windows abre com os acentos certos.
+csv_atual = carteira[COLUNAS_CARTEIRA].to_csv(index=False, float_format="%.10g").encode("utf-8-sig")
+
+
+# ---------------------------------------------------------------------------
+# Preços e dólar (buscados em todas as páginas, porque os cálculos dependem deles)
+# ---------------------------------------------------------------------------
+dolar, data_dolar = buscar_preco(CODIGO_DOLAR)
+consultas = {}  # ativo -> (preço, data)
+for _, linha in carteira.iterrows():
+    codigo = linha["codigo_yahoo"]
+    if pd.isna(codigo) or str(codigo).strip() == "":
+        continue  # o Caixa não tem código: o preço dele é 1
+    consultas[linha["ativo"]] = buscar_preco(str(codigo).strip())
+
+sem_preco = [ativo for ativo, (preco, _) in consultas.items() if preco is None]
+
+# Plano B: o que o Yahoo não devolveu, a pessoa digita (na página Preços).
+dolar_fonte = "Yahoo"
+precos_manuais = {}
+if dolar is None:
+    dolar = valor_manual("dolar")
+    dolar_fonte = "manual"
+for ativo in sem_preco:
+    precos_manuais[ativo] = valor_manual(ativo)
+
+# Monta a tabela de preços (usada para calcular os valores e nos formulários).
+linhas = []
+for _, linha in carteira.iterrows():
+    ativo = linha["ativo"]
+    if ativo not in consultas:  # Caixa
+        preco, data, fonte = 1.0, None, "caixa (valor 1)"
+    else:
+        preco, data = consultas[ativo]
+        fonte = "Yahoo"
+        if preco is None:
+            preco = precos_manuais.get(ativo) or None  # 0 vira "faltando"
+            fonte = "manual" if preco else "FALTANDO"
+    linhas.append({
+        "ativo": ativo,
+        "moeda": linha["moeda"],
+        "preco": round(preco, 4) if preco else None,
+        "data_do_preco": data.strftime("%d/%m/%Y") if data else "-",
+        "fonte": fonte,
+    })
+tabela_precos = pd.DataFrame(linhas)
+
+
+# ---------------------------------------------------------------------------
+# Valores em R$ e diferença para a meta
+# ---------------------------------------------------------------------------
+calculo_ok = bool(dolar) and not (tabela_precos["fonte"] == "FALTANDO").any()
+erro_calculo = None
+if calculo_ok:
+    try:
+        por_ativo, por_classe, patrimonio = calcular(carteira, metas, tabela_precos, dolar)
+        por_classe["situacao"] = por_classe["diferenca_rs"].apply(situacao)
+        por_ativo["situacao"] = por_ativo["diferenca_rs"].apply(situacao)
+    except Exception as erro:
+        calculo_ok, erro_calculo = False, str(erro)
+
+carregando.empty()  # tudo calculado (ou parou com aviso): tira a mensagem de espera
+
+COLUNAS_RS = ["Valor (R$)", "Meta (R$)", "Diferença (R$)"]
+COLUNAS_PCT = ["Atual (%)", "Meta (%)"]
+AVISO_SEM_CALCULO = "Faltam preços (ou a cotação do dólar) para calcular. Veja a página Preços."
+
+
+def mostrar_movimentacoes():
+    """Desenha os formulários de movimentação e a lista do que foi registrado."""
     # Mensagem de sucesso da última movimentação (guardada porque a tela é recarregada depois de salvar).
     if st.session_state.get("mensagem"):
         st.success(st.session_state.pop("mensagem"))
 
     # --- Compra e venda ---
     with st.form("form_negociacao", clear_on_submit=True):
-        st.markdown("**Compra ou venda de um ativo** (o caixa se ajusta sozinho, ao preço mostrado na tabela de preços)")
+        st.markdown("**Compra ou venda de um ativo** (o caixa se ajusta sozinho, ao preço mostrado na página Preços)")
         ativo_escolhido = st.selectbox("Ativo", [a for a in carteira["ativo"] if a != "Caixa"])
         operacao = st.radio("Operação", ["Compra", "Venda"], horizontal=True)
         modo = st.radio("Informar por", ["Quantidade", "Valor (R$)"], horizontal=True)
@@ -485,7 +473,7 @@ with st.expander("Registrar movimentação", expanded=False):
         if numero_lido is None:
             st.error(mensagem_numero_invalido(numero))
         elif linha_preco["fonte"] == "FALTANDO":
-            st.error(f"Sem preço para {ativo_escolhido}. Digite o preço manualmente na seção de preços.")
+            st.error(f"Sem preço para {ativo_escolhido}. Digite o preço manualmente na página Preços.")
         else:
             erro_negociacao, detalhes = registrar_negociacao(
                 carteira, ativo_escolhido, operacao, modo, numero_lido, linha_preco["preco"], dolar)
@@ -533,55 +521,226 @@ with st.expander("Registrar movimentação", expanded=False):
 
 
 # ---------------------------------------------------------------------------
-# Item 3: valores em R$ e diferença para a meta
+# Página: Visão geral (botões principais, patrimônio, cartões e tabela por classe)
 # ---------------------------------------------------------------------------
-if (tabela_precos["fonte"] == "FALTANDO").any():
-    st.stop()  # o aviso já foi mostrado acima; sem todos os preços não dá para calcular
+if pagina == "Visão geral":
+    # Faixa de botões na mesma ordem dos passos de "Como usar".
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        st.button("Carregar carteira (CSV)", key="inicio_carregar", on_click=ir_para, args=("Minha carteira",))
+    with b2:
+        st.button("Atualizar preços", key="inicio_atualizar", on_click=atualizar_precos)
+    with b3:
+        st.button("Registrar movimentações", key="inicio_registrar", on_click=ir_para, args=("Registrar movimentações",))
+    with b4:
+        st.download_button("Baixar carteira (CSV)", data=csv_atual, key="inicio_baixar",
+                           file_name="carteira_atualizada.csv", mime="text/csv")
+    st.markdown("Antes de fechar a página, baixe a carteira: ao abrir o app de novo, ele volta ao exemplo.")
+    if st.session_state.get("busca_refeita_as"):
+        st.markdown(f"Busca de preços refeita às {st.session_state['busca_refeita_as']} (horário de Brasília).")
 
-try:
-    por_ativo, por_classe, patrimonio = calcular(carteira, metas, tabela_precos, dolar)
-except Exception as erro:
-    st.error(f"Não consegui calcular os valores: {erro}")
-    st.stop()
+    with st.expander("Como usar em 4 passos", expanded=True):
+        st.markdown(
+            "1. **Carregue a sua carteira** em CSV (ou use o exemplo que já está aqui).\n"
+            "2. **Atualize os preços** para buscar as cotações do Yahoo Finance.\n"
+            "3. **Registre as movimentações** (compras, vendas, aportes e retiradas) e veja abaixo quanto cada "
+            "classe está acima ou abaixo da meta.\n"
+            "4. **Baixe a carteira (CSV)** antes de fechar a página. Na próxima consulta, carregue esse arquivo "
+            "no passo 1 para continuar de onde parou.")
 
-st.divider()
-st.subheader("Painel: onde estou em relação à meta")
-st.metric("Patrimônio total", formata_rs(patrimonio))
-st.caption("Diferença = valor atual menos a meta. "
-           "Vermelho: abaixo da meta (falta comprar). Azul: acima da meta. Verde: na meta (diferença menor que R$ 1).")
+    if erro_calculo:
+        st.error(f"Não consegui calcular os valores: {erro_calculo}")
+    elif not calculo_ok:
+        st.info(AVISO_SEM_CALCULO)
+    else:
+        st.markdown("**Patrimônio total**")  # o rótulo do st.metric é pequeno; este texto usa o tamanho normal
+        st.metric("Patrimônio total", formata_rs(patrimonio), label_visibility="collapsed")
+        st.markdown("Diferença = valor atual menos a meta. Vermelho: abaixo da meta (falta comprar). "
+                   "Verde: acima da meta. Azul: na meta (diferença de até R$ 100, para mais ou para menos).")
 
-# --- Cartões por classe (3 por linha) ---
-st.markdown("**Por classe**")
-por_classe["situacao"] = por_classe["diferenca_rs"].apply(situacao)
-linhas_de_cartoes = [por_classe.iloc[i:i + 3] for i in range(0, len(por_classe), 3)]
-for grupo in linhas_de_cartoes:
-    colunas = st.columns(3)
-    for coluna, (_, classe) in zip(colunas, grupo.iterrows()):
-        with coluna:
-            st.metric(
-                label=f"{classe['classe']} - {formata_pct(classe['pct_atual'])} (meta {formata_pct(classe['meta_pct'])})",
-                value=formata_rs(classe["valor_rs"]),
-                delta=f"{formata_rs(classe['diferenca_rs'])} vs meta",
-                delta_color="off" if classe["situacao"] == "Na meta" else "normal",
-            )
+        # Cartões por classe (3 por linha)
+        linhas_de_cartoes = [por_classe.iloc[i:i + 3] for i in range(0, len(por_classe), 3)]
+        for grupo in linhas_de_cartoes:
+            colunas = st.columns(3)
+            for coluna, (_, classe) in zip(colunas, grupo.iterrows()):
+                with coluna:
+                    rotulo = f"{classe['classe']} - {formata_pct(classe['pct_atual'])} (meta {formata_pct(classe['meta_pct'])})"
+                    st.markdown(f"**{rotulo}**")  # rótulo em tamanho normal (o do st.metric é pequeno)
+                    st.metric(
+                        label=rotulo,
+                        value=formata_rs(classe["valor_rs"]),
+                        delta=f"{formata_rs(classe['diferenca_rs'])} vs meta",
+                        delta_color="off" if classe["situacao"] == "Na meta" else "normal",
+                        label_visibility="collapsed",
+                    )
 
-# --- Tabela por classe, colorida ---
-tabela_classe = por_classe.rename(columns={
-    "classe": "Classe", "meta_pct": "Meta (%)", "valor_rs": "Valor (R$)", "pct_atual": "Atual (%)",
-    "meta_rs": "Meta (R$)", "diferenca_rs": "Diferença (R$)", "situacao": "Situação"})
-tabela_classe = tabela_classe[["Classe", "Valor (R$)", "Atual (%)", "Meta (%)", "Meta (R$)", "Diferença (R$)", "Situação"]]
-st.dataframe(
-    tabela_colorida(tabela_classe, ["Valor (R$)", "Meta (R$)", "Diferença (R$)"], ["Atual (%)", "Meta (%)"]),
-    hide_index=True)
+        # Tabela por classe, colorida
+        tabela_classe = por_classe.rename(columns={
+            "classe": "Classe", "meta_pct": "Meta (%)", "valor_rs": "Valor (R$)", "pct_atual": "Atual (%)",
+            "meta_rs": "Meta (R$)", "diferenca_rs": "Diferença (R$)", "situacao": "Situação"})
+        tabela_classe = tabela_classe[["Classe", "Valor (R$)", "Atual (%)", "Meta (%)", "Meta (R$)", "Diferença (R$)", "Situação"]]
+        st.dataframe(tabela_colorida(tabela_classe, COLUNAS_RS, COLUNAS_PCT), hide_index=True)
 
-# --- Tabela por ativo, colorida ---
-st.markdown("**Por ativo**")
-por_ativo["situacao"] = por_ativo["diferenca_rs"].apply(situacao)
-tabela_ativo = por_ativo.rename(columns={
-    "ativo": "Ativo", "classe": "Classe", "quantidade": "Quantidade", "preco": "Preço",
-    "moeda": "Moeda do preço", "valor_rs": "Valor (R$)", "pct_atual": "Atual (%)",
-    "meta_pct_total": "Meta (%)", "meta_rs": "Meta (R$)", "diferenca_rs": "Diferença (R$)",
-    "situacao": "Situação"})
-st.dataframe(
-    tabela_colorida(tabela_ativo, ["Valor (R$)", "Meta (R$)", "Diferença (R$)"], ["Atual (%)", "Meta (%)"]),
-    hide_index=True)
+
+# ---------------------------------------------------------------------------
+# Página: Visão por ativo (os ativos de uma classe, ou de todas, coloridos)
+# ---------------------------------------------------------------------------
+elif pagina == "Visão por ativo":
+    if erro_calculo:
+        st.error(f"Não consegui calcular os valores: {erro_calculo}")
+    elif not calculo_ok:
+        st.info(AVISO_SEM_CALCULO)
+    else:
+        escolha = st.selectbox("Mostrar a classe", ["Todas"] + list(por_classe["classe"]))
+        ativos_mostrados = por_ativo if escolha == "Todas" else por_ativo[por_ativo["classe"] == escolha]
+
+        if escolha != "Todas":  # resumo da classe escolhida
+            resumo = por_classe[por_classe["classe"] == escolha].iloc[0]
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Valor atual", formata_rs(resumo["valor_rs"]))
+            c2.metric("Meta", formata_rs(resumo["meta_rs"]))
+            c3.metric("Diferença", formata_rs(resumo["diferenca_rs"]))
+
+        tabela_ativo = ativos_mostrados.rename(columns={
+            "ativo": "Ativo", "classe": "Classe", "quantidade": "Quantidade", "preco": "Preço",
+            "moeda": "Moeda do preço", "valor_rs": "Valor (R$)", "pct_atual": "Atual (%)",
+            "meta_pct_total": "Meta (%)", "meta_rs": "Meta (R$)", "diferenca_rs": "Diferença (R$)",
+            "situacao": "Situação"})
+        st.dataframe(tabela_colorida(tabela_ativo, COLUNAS_RS, COLUNAS_PCT), hide_index=True)
+
+
+# ---------------------------------------------------------------------------
+# Página: Registrar movimentações
+# ---------------------------------------------------------------------------
+elif pagina == "Registrar movimentações":
+    st.subheader("Registrar movimentações")
+    if not dolar:
+        st.info("Sem a cotação do dólar não dá para registrar movimentações. Veja a página Preços.")
+    else:
+        mostrar_movimentacoes()
+
+
+# ---------------------------------------------------------------------------
+# Página: Preços (o que o Yahoo devolveu e o plano B manual)
+# ---------------------------------------------------------------------------
+elif pagina == "Preços":
+    st.subheader("Preços")
+    st.markdown("Último preço disponível no Yahoo Finance, com a data de cada um. Durante o pregão é o preço do momento "
+               "(com pequeno atraso); fora dele, o fechamento. Ativos em dólar mostram o preço em dólar; "
+               "os valores em R$ aparecem na página Visão geral.")
+
+    # Botão para esquecer o que foi guardado e buscar tudo de novo.
+    st.button("Atualizar preços", key="precos_atualizar", on_click=atualizar_precos)
+    if st.session_state.get("busca_refeita_as"):
+        st.markdown(f"Busca de preços refeita às {st.session_state['busca_refeita_as']} (horário de Brasília).")
+
+    if dolar_fonte == "manual" or sem_preco:
+        st.warning("O Yahoo não devolveu alguns preços. Digite abaixo o que faltou "
+                   "(ou clique em 'Atualizar preços' para tentar de novo).")
+        with st.expander("Digitar preços manualmente", expanded=True):
+            if dolar_fonte == "manual":
+                if "manual_dolar" not in st.session_state:  # volta o que já tinha sido digitado antes
+                    st.session_state["manual_dolar"] = valor_manual("dolar")
+                dolar = st.number_input("Dólar (R$ por US$)", min_value=0.0, step=0.01, key="manual_dolar")
+            for ativo in sem_preco:
+                if f"manual_{ativo}" not in st.session_state:
+                    st.session_state[f"manual_{ativo}"] = valor_manual(ativo)
+                st.number_input(f"Preço de {ativo}", min_value=0.0, step=0.01, key=f"manual_{ativo}")
+
+    if not dolar:
+        st.error("Sem a cotação do dólar não dá para converter os ativos em dólar para R$. "
+                 "Digite o dólar acima ou clique em 'Atualizar preços'.")
+
+    st.metric("Dólar (R$ por US$)", f"{dolar:.4f}",
+              help=f"Fonte: {dolar_fonte}" + (f", preço de {data_dolar.strftime('%d/%m/%Y')}" if data_dolar else ""))
+    st.dataframe(  # nomes de coluna para leitura (a tabela interna usa nomes sem acento)
+        tabela_precos.rename(columns={"ativo": "Ativo", "moeda": "Moeda", "preco": "Preço",
+                                      "data_do_preco": "Data do preço", "fonte": "Fonte"}),
+        hide_index=True)
+
+    # Avisos honestos sobre a qualidade dos preços.
+    if (tabela_precos["fonte"] == "FALTANDO").any():
+        faltando = ", ".join(tabela_precos.loc[tabela_precos["fonte"] == "FALTANDO", "ativo"])
+        st.warning(f"Ainda sem preço: {faltando}. Os cálculos precisam de todos os preços.")
+
+    datas = [d for _, d in consultas.values() if d is not None]
+    if datas and (date.today() - min(datas)).days > DIAS_PARA_AVISAR:
+        st.warning(f"Há preços com mais de {DIAS_PARA_AVISAR} dias (o mais antigo é de {min(datas).strftime('%d/%m/%Y')}).")
+
+    st.markdown("Os preços vêm do Yahoo Finance pela biblioteca yfinance (gratuita e não oficial) e podem divergir "
+               "da cotação da corretora ou ter atraso.")
+
+
+# ---------------------------------------------------------------------------
+# Página: Minha carteira (carregar, baixar e conferir a carteira e as metas)
+# ---------------------------------------------------------------------------
+else:
+    st.subheader("Minha carteira")
+    if st.session_state.get("aviso_carteira"):  # mensagem da última carga (a tela é recarregada depois de carregar)
+        st.success(st.session_state.pop("aviso_carteira"))
+    st.markdown("Este app é público: use só dados fictícios aqui. Para dados reais, rode no seu computador. "
+               "A carteira não é gravada em arquivo: fica na memória enquanto a página está aberta.")
+
+    # --- Carregar e baixar, no topo: são as primeiras ações de quem usa o app ---
+    col_carregar, col_salvar = st.columns(2)
+    with col_carregar:
+        st.markdown("**Carregar uma carteira**")
+        arquivo = st.file_uploader("Carteira em CSV (um arquivo por vez)", type="csv")
+        st.markdown("Passo 1: escolha o arquivo. Passo 2: clique em \"Usar esta carteira\". "
+                   "O \"+\" ao lado do nome serve para trocar o arquivo, não para juntar vários.")
+        if arquivo is not None and st.button("Usar esta carteira"):
+            try:
+                nova, erro_csv = validar_carteira(pd.read_csv(arquivo, encoding="utf-8-sig"), metas)
+            except Exception as erro:  # arquivo que nem é um CSV legível
+                nova, erro_csv = None, f"Não consegui ler o arquivo: {erro}"
+            if erro_csv:
+                st.error(erro_csv + " A carteira atual foi mantida.")
+            else:
+                st.session_state["carteira"] = nova
+                st.session_state["movimentacoes"] = []
+                st.session_state["aviso_carteira"] = f"Carteira carregada: {len(nova)} linhas."
+                st.rerun()
+        with st.expander("Como preparar o arquivo"):
+            st.markdown("O CSV precisa destas colunas: " + ", ".join(COLUNAS_CARTEIRA) + ". "
+                        "As metas por classe continuam as do arquivo metas_classe.csv. "
+                        "Use ponto como decimal no arquivo (ex.: 0.5).")
+
+    with col_salvar:
+        st.markdown("**Salvar a carteira**")
+        st.markdown("Baixe a carteira com as suas movimentações. Ao recarregar a página, o app volta ao exemplo; "
+                   "para continuar de onde parou, carregue o arquivo baixado.")
+        st.download_button("Baixar carteira atualizada (CSV)", data=csv_atual, key="carteira_baixar",
+                           file_name="carteira_atualizada.csv", mime="text/csv")
+        if st.button("Voltar para a carteira de exemplo"):
+            st.session_state["carteira"] = ler_tabela(PASTA / "carteira_exemplo.csv", COLUNAS_CARTEIRA)
+            st.session_state["movimentacoes"] = []
+            st.session_state["aviso_carteira"] = "Voltou para a carteira de exemplo."
+            st.rerun()
+
+    # --- A carteira e as metas, com nomes de coluna para leitura ---
+    st.subheader("Carteira atual")
+    tabela_carteira = carteira[COLUNAS_CARTEIRA].rename(columns=NOMES_CARTEIRA)
+    st.dataframe(
+        tabela_carteira.style.format({"Quantidade": formata_quantidade, "Meta dentro da classe (%)": formata_pct},
+                                     na_rep="-"),
+        hide_index=True)
+
+    st.subheader("Metas por classe")
+    tabela_metas = metas.rename(columns={"classe": "Classe", "meta_pct": "Meta (%)"})
+    st.dataframe(tabela_metas.style.format({"Meta (%)": formata_pct}), hide_index=True)
+
+    # Mostra se as metas fazem sentido (somam 100%).
+    avisos = conferir_metas(carteira, metas)
+    if avisos:
+        for aviso in avisos:
+            st.warning(aviso)
+    else:
+        st.success("Conferência das metas: tudo certo (cada nível soma 100%).")
+
+
+# ---------------------------------------------------------------------------
+# Rodapé (aparece em todas as páginas): leva ao código e à explicação completa do projeto
+# ---------------------------------------------------------------------------
+st.markdown("---")
+st.markdown("Código, testes e explicação do projeto no "
+            "[GitHub](https://github.com/guilhermeavila-AI/ferramenta-rebalanceamento-carteira).")
