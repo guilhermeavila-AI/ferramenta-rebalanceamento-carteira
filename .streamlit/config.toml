@@ -1,0 +1,18 @@
+# Configuração visual do app (o Streamlit lê este arquivo sozinho).
+# baseFontSize: tamanho base da letra, em pixels (o padrão é 16).
+[theme]
+baseFontSize = 18
+
+# Dois temas (claro e escuro): com os dois definidos, o Streamlit deixa a pessoa escolher no menu do app.
+# Os valores abaixo são as cores padrão do Streamlit.
+[theme.light]
+primaryColor = "#ff4b4b"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f2f6"
+textColor = "#31333f"
+
+[theme.dark]
+primaryColor = "#ff4b4b"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#262730"
+textColor = "#fafafa"
